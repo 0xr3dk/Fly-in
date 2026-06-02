@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Literal
 
 
 @dataclass
@@ -7,9 +6,9 @@ class Hub:
     name: str
     x: int
     y: int
-    type: Literal["start", "end", "hub"]
+    type: str
     color: str = "white"
-    max_drones: int | None = None
+    max_drones: int = 1
     zone: str | None = None
 
 
