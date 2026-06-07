@@ -7,16 +7,16 @@ class Hub:
     x: int
     y: int
     type: str
-    color: str = "white"
+    color: str = "none"
     max_drones: int = 1
-    zone: str | None = None
+    zone: str = "normal"
 
 
 @dataclass
 class Connection:
     source: str
     target: str
-    max_link_capacity: int | None = None
+    max_link_capacity: int = 1
 
 
 @dataclass

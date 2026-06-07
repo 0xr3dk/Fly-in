@@ -1,3 +1,4 @@
+from multiprocessing.sharedctypes import Value
 from typing import Any
 
 from models import MapConfig, Hub
@@ -21,7 +22,7 @@ class ConfigSyntaxError(Exception):
         super().__init__(message)
 
     def __str__(self) -> str:
-        message = str(self.args[0])
+        message = self.args[0]
 
         parts = [
             f"{message}",
@@ -42,7 +43,6 @@ class ConfigParser:
         "end_hub": "end",
         "hub": "hub",
     }
-    HUB_TYPES: frozenset[str] = frozenset({"start_hub", "end_hub", "hub"})
     VALID_METADATA_KEYS: dict[str, frozenset[str]] = {
         "hub": frozenset(
             {
@@ -51,7 +51,7 @@ class ConfigParser:
                 "max_drones",
             }
         ),
-        "connection": frozenset("max_link_capacity"),
+        "connection": frozenset({"max_link_capacity"}),
     }
 
     @staticmethod
@@ -61,7 +61,7 @@ class ConfigParser:
 
     @staticmethod
     def _parse_meta_attrs(keyword: str, meta_attrs: str) -> dict[str, Any]:
-        attrs = {}
+        attrs: dict[str, Any] = {}
         for pair in meta_attrs.split():
             key, _, val = pair.partition("=")
             if not key or not val:
@@ -77,7 +77,8 @@ class ConfigParser:
                 raise ValueError(
                     f"Invalid metadata key for {keyword_type}",
                     "Expected one of: "
-                    + ", ".join(f"'{key}'" for key in validate_metadata_keys),
+                    + ", ".join(f"'{key}'" for key in validate_metadata_keys)
+                    + f", got '{key}'",
                 )
             if not val.isalnum():
                 raise ValueError(
@@ -88,12 +89,22 @@ class ConfigParser:
 
         return attrs
 
-    def _split_attrs(self, keyword: str, attrs: str) -> tuple[str, dict]:
+    def _split_attrs(
+        self, keyword: str, attrs: str
+    ) -> tuple[str, dict[str, Any]]:
         if "[" not in attrs:
             return attrs, {}
 
-        attrs, meta_attrs = attrs.split("[")
-        return attrs, self._parse_meta_attrs(keyword, meta_attrs.rstrip("]"))
+        attrs, meta_attrs = attrs.split("[", 1)
+        if not meta_attrs.endswith("]"):
+            raise ValueError(
+                "Invalid zone definition",
+                "Expected format: {keyword}: <name> <x> <y>"
+                + " [metadata] (metadata is optional)",
+            )
+        return attrs, self._parse_meta_attrs(
+            keyword, meta_attrs.lstrip("[").rstrip("]")
+        )
 
     def parse(self, path: str = "maps/easy/01_linear_path.txt") -> MapConfig:
         config = MapConfig()
@@ -112,50 +123,50 @@ class ConfigParser:
                     try:
                         config.nb_drones = int(attrs)
                     except ValueError:
-                        raise ConfigSyntaxError(
-                            lineno,
-                            path,
-                            raw,
+                        raise ValueError(
                             "Invalid value for 'nb_drones'",
                             f"Expected an integer, got '{attrs}'",
                         )
 
-                elif keyword in ConfigParser.HUB_TYPES:
-                    try:
-                        attrs, meta_attrs = self._split_attrs(keyword, attrs)
-                    except SyntaxError as e:
-                        raise ConfigSyntaxError(
-                            lineno,
-                            path,
-                            raw,
-                            e.args[0],
-                            e.args[1] if len(e.args) > 1 else None,
-                        )
+                elif (
+                    keyword in ConfigParser.HUB_KINDS
+                    or keyword == "connection"
+                ):
+                    attrs, meta_attrs = self._split_attrs(keyword, attrs)
                     parts = attrs.split()
-                    hub = Hub(
-                        name=parts[0],
-                        x=int(parts[1]),
-                        y=int(parts[2]),
-                        type=ConfigParser.HUB_KINDS[keyword],
-                        color=meta_attrs.get("color", "white"),
-                        zone=meta_attrs.get("zone", "normal"),
-                        max_drones=int(meta_attrs.get("max_drones", 1)),
-                    )
-                    config.hubs[hub.name] = hub
+                    if keyword == "connection":
+                        ...
+                    else:
+                        if len(parts) != 3:
+                            raise IndexError(
+                                "Invalid zone definition",
+                                "Expected format: {keyword}: <name> <x> <y>"
+                                + " [metadata] (metadata is optional)",
+                            )
+                        if not parts[0].isalnum():
+                            raise ValueError(
+                                "Invalid zone name",
+                                "Expected a valid alphanumeric string"
+                                + f", got '{parts[0]}'",
+                            )
 
-                elif keyword == "connection":
-                    ...
+                        hub = Hub(
+                            name=parts[0],
+                            x=int(parts[1]),
+                            y=int(parts[2]),
+                            type=ConfigParser.HUB_KINDS[keyword],
+                            color=meta_attrs.get("color", "none"),
+                            zone=meta_attrs.get("zone", "normal"),
+                            max_drones=int(meta_attrs.get("max_drones", 1)),
+                        )
+                        config.hubs[hub.name] = hub
 
                 else:
-                    raise ConfigSyntaxError(
-                        lineno,
-                        path,
-                        raw,
-                        f"Invalid keyword '{keyword}'",
-                        (
-                            "Expected one of: 'start_hub', 'end_hub', "
-                            + "'hub', 'nb_drones', 'connection'"
-                        ),
+                    raise ValueError(
+                        "Invalid keyword",
+                        "Expected one of: 'start_hub', 'end_hub', "
+                        + "'hub', 'nb_drones', 'connection'"
+                        + f", got '{keyword}'",
                     )
 
             except (ValueError, IndexError) as e:
