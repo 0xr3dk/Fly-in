@@ -1,7 +1,6 @@
-from multiprocessing.sharedctypes import Value
 from typing import Any
 
-from models import MapConfig, Hub
+from models import Connection, MapConfig, Hub
 
 
 class ConfigSyntaxError(Exception):
@@ -69,7 +68,7 @@ class ConfigParser:
                     "Invalid metadata format",
                     "Expected format: 'key=value'",
                 )
-            keyword_type = "connection" if "hub" not in keyword else "hub"
+            keyword_type = "hub" if "hub" in keyword else "connection"
             validate_metadata_keys = ConfigParser.VALID_METADATA_KEYS[
                 keyword_type
             ]
@@ -98,9 +97,11 @@ class ConfigParser:
         attrs, meta_attrs = attrs.split("[", 1)
         if not meta_attrs.endswith("]"):
             raise ValueError(
-                "Invalid zone definition",
-                "Expected format: {keyword}: <name> <x> <y>"
-                + " [metadata] (metadata is optional)",
+                "Invalid definition:\n",
+                "Expected formats:\n"
+                + "\t\tzone:       '<hub type>: <name> <x> <y> [metadata]'\n"
+                + "\t\tconnection: 'connection: <name1>-<name2> [metadata]'"
+                + " (metadata is optional in both)",
             )
         return attrs, self._parse_meta_attrs(
             keyword, meta_attrs.lstrip("[").rstrip("]")
@@ -135,13 +136,37 @@ class ConfigParser:
                     attrs, meta_attrs = self._split_attrs(keyword, attrs)
                     parts = attrs.split()
                     if keyword == "connection":
-                        ...
+                        try:
+                            (connection_name,) = parts
+                        except ValueError:
+                            raise ValueError(
+                                "Invalid connection definition",
+                                "Expected format: 'connection: <name1>-<name2>"
+                                + " [metadata]' (metadata is optional)",
+                            )
+                        if connection_name.count("-") != 1:
+                            raise ValueError(
+                                "Invalid connection name",
+                                "Expected a name of this format"
+                                + f" <name1>-<name2>, got {connection_name}",
+                            )
+
+                        name1, name2 = connection_name.split("-")
+                        config.connections.append(
+                            Connection(
+                                source=name1,
+                                target=name2,
+                                max_link_capacity=int(
+                                    meta_attrs.get("max_link_capacity", 1)
+                                ),
+                            )
+                        )
                     else:
                         if len(parts) != 3:
-                            raise IndexError(
+                            raise ValueError(
                                 "Invalid zone definition",
-                                "Expected format: {keyword}: <name> <x> <y>"
-                                + " [metadata] (metadata is optional)",
+                                "Expected format: '<hub type>: <name> <x> <y>"
+                                + " [metadata]' (metadata is optional)",
                             )
                         if not parts[0].isalnum():
                             raise ValueError(
